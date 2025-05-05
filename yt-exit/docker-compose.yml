@@ -1,0 +1,24 @@
+########################
+# 1️⃣  Youtube Exit-node tunnel #
+########################
+services:
+  gluetun-exit:               # Host-mode (Albania, for Tailscale)
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun-exit
+    network_mode: "host"
+    cap_add: [NET_ADMIN]
+    env_file:
+      - ./.env
+    devices: ["/dev/net/tun:/dev/net/tun"]
+    environment:
+      VPN_SERVICE_PROVIDER: protonvpn
+      OPENVPN_USER: ${PROTONVPN_USERNAME}
+      OPENVPN_PASSWORD: ${PROTONVPN_PASSWORD}
+      SERVER_COUNTRIES: Albania
+      TZ: Europe/Tirane
+      FIREWALL_OUTBOUND_SUBNETS: 100.64.0.0/10   # let Tailscale replies out
+      LOG_LEVEL: debug
+      CONTROL_SERVER_PORT: 8023         # Change from default 8023 to avoid port conflict
+    volumes:
+      - /mnt/user/appdata/gluetun-exit:/gluetun
+    restart: unless-stopped

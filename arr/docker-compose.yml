@@ -1,0 +1,250 @@
+###############################################################################
+# Shared extension blocks
+###############################################################################
+x-arr-env: &arr-env
+  PUID: ${PUID:-99}
+  PGID: ${PGID:-100}
+  TZ:  ${TZ:-Europe/Warsaw}
+
+###############################################################################
+# Network
+###############################################################################
+networks:
+  traefik_proxy:
+    external: true
+
+services:
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    # Add healthcheck to ensure VPN is up before other services start
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - dev/net/tun
+    env_file:
+      - ./.env
+    ports:
+      - "8080:8080" # qbittorrent
+      - "8989:8989" # Sonarr
+      - "7878:7878" # Radarr
+      - "8787:8787" # Readarr
+      - "9696:9696" # Prowlarr
+      - "5055:5055" # overseerr
+      - "6767:6767" # bazarr
+      - "51413:51413"  # BitTorrent listening port (TCP)
+      - "51413:51413/udp"  # BitTorrent listening port (UDP)
+      - "9999:9999/tcp"  # Health check server
+    environment:
+      TZ:                         ${TZ}
+      # --- ProtonVPN / WireGuard ---
+      VPN_SERVICE_PROVIDER:       protonvpn
+      VPN_TYPE:                   wireguard
+      WIREGUARD_PRIVATE_KEY:      ${WG_PRIVATE_KEY}
+      WIREGUARD_PUBLIC_KEY:       ${WG_PUBLIC_KEY}
+      WIREGUARD_ADDRESSES:        10.2.0.2/32
+      WIREGUARD_ALLOWED_IPS:      0.0.0.0/0
+      # DNS – keep both spellings for old/new images
+      DNS_ADDRESS:                10.2.0.1
+      DNS_ADDRESSES:              10.2.0.1
+      # Server selection / features
+      SERVER_COUNTRIES:           Netherlands,Switzerland
+      SERVER_FEATURES:            p2p
+      # Port-forwarding
+      VPN_PORT_FORWARDING:        "on"
+      VPN_PORT_FORWARDING_PROVIDER: protonvpn
+      VPN_PORT_FORWARD_ONLY:          "on"
+      VPN_PORT_FORWARDING_STATUS_FILE: "/tmp/forwarded_port"
+      # Misc
+      LOG_LEVEL:                  debug
+      DOT:                        off
+      FIREWALL_DEBUG:             "on"
+      FIREWALL_OUTBOUND_SUBNETS: 100.64.0.0/10   # let Tailscale replies out
+      HEALTH_SERVER_ADDRESS:      0.0.0.0:9999
+    volumes:
+      - /mnt/user/appdata/gluetun:/gluetun
+      - /mnt/user/appdata/gluetun/forwarded_port:/tmp/forwarded_port
+    restart: unless-stopped
+    networks:
+      - traefik_proxy
+    labels: &gluetun-traefik
+      traefik.enable: "true"
+
+      # qBittorrent
+      traefik.http.routers.qbittorrent-secure.entrypoints:           websecure
+      traefik.http.routers.qbittorrent-secure.rule:                  Host(`qbit.${DOMAIN_NAME}`)
+      traefik.http.routers.qbittorrent-secure.tls:                   "true"
+      traefik.http.routers.qbittorrent-secure.tls.certresolver:      letsencrypt
+      traefik.http.routers.qbittorrent-secure.service:               qbittorrent-svc
+      traefik.http.services.qbittorrent-svc.loadbalancer.server.port: "8080"
+
+      # Radarr
+      traefik.http.routers.radarr-secure.entrypoints:                websecure
+      traefik.http.routers.radarr-secure.rule:                       Host(`radarr.${DOMAIN_NAME}`)
+      traefik.http.routers.radarr-secure.tls:                        "true"
+      traefik.http.routers.radarr-secure.tls.certresolver:           letsencrypt
+      traefik.http.routers.radarr-secure.service:                    radarr-svc
+      traefik.http.services.radarr-svc.loadbalancer.server.port:     "7878"
+
+      # Sonarr
+      traefik.http.routers.sonarr-secure.entrypoints:                websecure
+      traefik.http.routers.sonarr-secure.rule:                       Host(`sonarr.${DOMAIN_NAME}`)
+      traefik.http.routers.sonarr-secure.tls:                        "true"
+      traefik.http.routers.sonarr-secure.tls.certresolver:           letsencrypt
+      traefik.http.routers.sonarr-secure.service:                    sonarr-svc
+      traefik.http.services.sonarr-svc.loadbalancer.server.port:     "8989"
+
+      # Readarr
+      traefik.http.routers.readarr-secure.entrypoints:               websecure
+      traefik.http.routers.readarr-secure.rule:                      Host(`readarr.${DOMAIN_NAME}`)
+      traefik.http.routers.readarr-secure.tls:                       "true"
+      traefik.http.routers.readarr-secure.tls.certresolver:          letsencrypt
+      traefik.http.routers.readarr-secure.service:                   readarr-svc
+      traefik.http.services.readarr-svc.loadbalancer.server.port:    "8787"
+
+      # Prowlarr
+      traefik.http.routers.prowlarr-secure.entrypoints:              websecure
+      traefik.http.routers.prowlarr-secure.rule:                     Host(`prowlarr.${DOMAIN_NAME}`)
+      traefik.http.routers.prowlarr-secure.tls:                      "true"
+      traefik.http.routers.prowlarr-secure.tls.certresolver:         letsencrypt
+      traefik.http.routers.prowlarr-secure.service:                  prowlarr-svc
+      traefik.http.services.prowlarr-svc.loadbalancer.server.port:   "9696"
+
+      # Overseerr
+      traefik.http.routers.overseerr-secure.entrypoints:             websecure
+      traefik.http.routers.overseerr-secure.rule:                    Host(`overseerr.${DOMAIN_NAME}`)
+      traefik.http.routers.overseerr-secure.tls:                     "true"
+      traefik.http.routers.overseerr-secure.tls.certresolver:        letsencrypt
+      traefik.http.routers.overseerr-secure.service:                 overseerr-svc
+      traefik.http.services.overseerr-svc.loadbalancer.server.port:  "5055"
+
+      # Bazarr
+      traefik.http.routers.bazarr-secure.entrypoints:                websecure
+      traefik.http.routers.bazarr-secure.rule:                       Host(`bazarr.${DOMAIN_NAME}`)
+      traefik.http.routers.bazarr-secure.tls:                        "true"
+      traefik.http.routers.bazarr-secure.tls.certresolver:           letsencrypt
+      traefik.http.routers.bazarr-secure.service:                    bazarr-svc
+      traefik.http.services.bazarr-svc.loadbalancer.server.port:     "6767"
+  qbittorrent:
+    image: linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy  # Wait for gluetun to be healthy
+    environment:
+      PUID:             ${PUID:-99}
+      PGID:             ${PGID:-100}
+      TZ:               ${TZ:-Europe/Warsaw}
+      WEBUI_PORT:       8080
+      WEBUI_USERNAME:   ${QB_USERNAME:-admin}
+      WEBUI_PASSWORD:   ${QB_PASSWORD:-adminadmin}
+      TORRENTING_PORT:  51413
+    volumes:
+      - /mnt/user/appdata/qbittorrent:/config
+      - /mnt/user/media/downloads:/downloads
+      # s6-overlay “one-shot” script → auto-config after start-up
+      - ./qbittorrent-init/10-config.sh:/etc/cont-init.d/10-config.sh:ro
+    restart: unless-stopped
+    labels:
+      <<: *gluetun-traefik     # re-use the global Traefik block
+
+  sonarr:
+    image: linuxserver/sonarr:latest
+    container_name: sonarr
+    network_mode: "service:gluetun"
+    depends_on: [gluetun]
+    environment: *arr-env
+    volumes:
+      - /mnt/user/appdata/sonarr:/config
+      - /mnt/user/media/tv:/tv
+      - /mnt/user/media/downloads/qbittorrent:/downloads
+    restart: unless-stopped
+  radarr:
+    image: linuxserver/radarr:latest
+    container_name: radarr
+    network_mode: "service:gluetun"
+    depends_on: [gluetun]
+    environment: *arr-env
+    volumes:
+      - /mnt/user/appdata/radarr:/config
+      - /mnt/user/media/movies:/movies
+      - /mnt/user/media/downloads/qbittorrent:/downloads
+    restart: unless-stopped
+
+  readarr:
+    image: ghcr.io/hotio/readarr:latest
+    container_name: readarr
+    network_mode: "service:gluetun"
+    depends_on: [gluetun, qbittorrent]
+    environment: *arr-env
+    volumes:
+      - /mnt/user/appdata/readarr:/config
+      - /mnt/user/media/books:/books
+      - /mnt/user/media/downloads/qbittorrent:/downloads
+    restart: unless-stopped
+
+  prowlarr:
+    image: linuxserver/prowlarr:latest
+    container_name: prowlarr
+    network_mode: "service:gluetun"
+    depends_on: [gluetun]
+    environment: *arr-env
+    volumes:
+      - /mnt/user/appdata/prowlarr:/config
+    restart: unless-stopped
+
+  overseerr:
+    image: lscr.io/linuxserver/overseerr:latest
+    container_name: overseerr
+    network_mode: "service:gluetun"
+    depends_on: [gluetun]
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ:   ${TZ:-Europe/Warsaw}
+    volumes:
+      - /mnt/user/appdata/overseerr/config:/config
+    restart: unless-stopped
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    network_mode: "service:gluetun"
+    depends_on: [gluetun]
+    environment: *arr-env
+    volumes:
+      - /mnt/user/appdata/bazarr:/config
+      - /mnt/user/media/movies:/movies
+      - /mnt/user/media/tv:/tv
+    restart: unless-stopped
+  # Port updater service for ProtonVPN dynamic port forwarding
+  network-health:
+    image: alpine:3.19
+    container_name: network-health
+    network_mode: "service:gluetun"
+    depends_on: [gluetun, qbittorrent]
+    env_file:
+      - ./.env
+    entrypoint: /bin/sh -c
+    command: |
+      apk add --no-cache curl netcat-openbsd
+      while true; do
+        echo "[CHECK] qBittorrent API..."
+        curl -sf http://localhost:8080/api/v2/app/version || echo "[ERROR] qBittorrent API unreachable"
+
+        BT_PORT=${BT_PORT:-51413}  # Set default value if not provided
+        echo "[CHECK] BitTorrent port $BT_PORT..."
+        nc -z -w5 localhost $BT_PORT || echo "[ERROR] Port $BT_PORT closed"
+        
+        echo "[CHECK] Gluetun health endpoint..."
+        curl -sf http://localhost:9999/health || echo "[ERROR] Gluetun health endpoint unreachable"
+
+        echo "[CHECK] Public IP..."
+        curl -sf https://api.ipify.org || echo "[ERROR] No outbound connectivity"
+
+        sleep 300
+      done
+    volumes:
+      - /mnt/user/appdata/network-health:/logs
+      - /tmp:/tmp
+    restart: unless-stopped

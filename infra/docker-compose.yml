@@ -1,0 +1,62 @@
+version: '3.8'
+
+networks:
+  traefik_proxy:
+    external: true
+
+services:
+  traefik:
+    image: traefik:v2.10
+    container_name: traefik
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - traefik_proxy
+    ports:
+      - "100.92.119.54:80:80"
+      - "100.92.119.54:443:443"
+    environment:
+      - CF_API_EMAIL=${CF_API_EMAIL}
+      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
+      - TZ=${TZ:-Europe/London}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /mnt/user/appdata/letsencrypt:/letsencrypt
+    dns:
+      - 100.100.100.100
+      - 1.1.1.1
+    command:
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.websecure.http.tls=true
+      - --entrypoints.websecure.http.tls.certresolver=letsencrypt
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=traefik_proxy
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge=true
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge.delaybeforecheck=60
+      - --api.dashboard=true
+      - --api.insecure=false
+      - --accesslog=true
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.${DOMAIN_NAME}`)"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.tls=true"
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.middlewares.secureHeaders.headers.browserXssFilter=true"
+      - "traefik.http.middlewares.secureHeaders.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.secureHeaders.headers.forceSTSHeader=true"
+      - "traefik.http.middlewares.secureHeaders.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.secureHeaders.headers.stsPreload=true"
+      - "traefik.http.middlewares.secureHeaders.headers.stsSeconds=31536000"
+      - "traefik.http.routers.dashboard.middlewares=secureHeaders@docker"
