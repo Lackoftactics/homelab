@@ -18,7 +18,7 @@ services:
       TZ: Europe/Tirane
       FIREWALL_OUTBOUND_SUBNETS: 100.64.0.0/10   # let Tailscale replies out
       LOG_LEVEL: debug
-      CONTROL_SERVER_PORT: 8023         # Change from default 8023 to avoid port conflict
+      HTTP_CONTROL_SERVER_ADDRESS: 0.0.0.0:8023  # Change from default 8000 to avoid port conflict
     volumes:
       - /mnt/user/appdata/gluetun-exit:/gluetun
     restart: unless-stopped
