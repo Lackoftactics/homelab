@@ -21,7 +21,7 @@ services:
     cap_add:
       - NET_ADMIN
     devices:
-      - dev/net/tun
+      - /dev/net/tun
     env_file:
       - ./.env
     ports:
@@ -32,6 +32,9 @@ services:
       - "9696:9696" # Prowlarr
       - "5055:5055" # overseerr
       - "6767:6767" # bazarr
+      - "8096:8096" # Jellyfin HTTP
+      - "7359:7359/udp" # Jellyfin service discovery
+      - "1900:1900/udp" # Jellyfin DLNA
       - "51413:51413"  # BitTorrent listening port (TCP)
       - "51413:51413/udp"  # BitTorrent listening port (UDP)
       - "9999:9999/tcp"  # Health check server
@@ -59,7 +62,7 @@ services:
       LOG_LEVEL:                  debug
       DOT:                        off
       FIREWALL_DEBUG:             "on"
-      FIREWALL_OUTBOUND_SUBNETS: 100.64.0.0/10   # let Tailscale replies out
+      FIREWALL_OUTBOUND_SUBNETS:  100.64.0.0/10   # let Tailscale replies out and all outbound traffic
       HEALTH_SERVER_ADDRESS:      0.0.0.0:9999
     volumes:
       - /mnt/user/appdata/gluetun:/gluetun
@@ -77,6 +80,16 @@ services:
       traefik.http.routers.qbittorrent-secure.tls.certresolver:      letsencrypt
       traefik.http.routers.qbittorrent-secure.service:               qbittorrent-svc
       traefik.http.services.qbittorrent-svc.loadbalancer.server.port: "8080"
+
+      # Jellyfin
+      traefik.http.routers.jellyfin-secure.entrypoints:            websecure
+      traefik.http.routers.jellyfin-secure.rule:                   Host(`jellyfin.${DOMAIN_NAME}`)
+      traefik.http.routers.jellyfin-secure.tls:                    "true"
+      traefik.http.routers.jellyfin-secure.tls.certresolver:       letsencrypt
+      traefik.http.routers.jellyfin-secure.service:                jellyfin-svc
+      traefik.http.services.jellyfin-svc.loadbalancer.server.port: "8096"
+      traefik.http.middlewares.jellyfin-headers.headers.customResponseHeaders.X-Frame-Options: "SAMEORIGIN"
+      traefik.http.routers.jellyfin-secure.middlewares:            jellyfin-headers
 
       # Radarr
       traefik.http.routers.radarr-secure.entrypoints:                websecure
@@ -142,12 +155,37 @@ services:
       TORRENTING_PORT:  51413
     volumes:
       - /mnt/user/appdata/qbittorrent:/config
-      - /mnt/user/media/downloads:/downloads
-      # s6-overlay “one-shot” script → auto-config after start-up
+      - /mnt/user/media/downloads/qbittorrent:/downloads
       - ./qbittorrent-init/10-config.sh:/etc/cont-init.d/10-config.sh:ro
     restart: unless-stopped
     labels:
       <<: *gluetun-traefik     # re-use the global Traefik block
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: jellyfin
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy  # Wait for gluetun to be healthy
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      <<: *arr-env
+      JELLYFIN_PublishedServerUrl: jellyfin.${DOMAIN_NAME}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8096/health"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    volumes:
+      - /mnt/user/appdata/jellyfin:/config
+      - /mnt/user/media/movies:/data/movies
+      - /mnt/user/media/tv:/data/tvshows
+
+      # Add any other media libraries you want to include
+      # - /mnt/user/media/music:/data/music
+    restart: unless-stopped
 
   sonarr:
     image: linuxserver/sonarr:latest
@@ -176,7 +214,11 @@ services:
     image: ghcr.io/hotio/readarr:latest
     container_name: readarr
     network_mode: "service:gluetun"
-    depends_on: [gluetun, qbittorrent]
+    depends_on:
+      gluetun:
+        condition: service_healthy
+      qbittorrent:
+        condition: service_started
     environment: *arr-env
     volumes:
       - /mnt/user/appdata/readarr:/config
@@ -188,7 +230,9 @@ services:
     image: linuxserver/prowlarr:latest
     container_name: prowlarr
     network_mode: "service:gluetun"
-    depends_on: [gluetun]
+    depends_on:
+      gluetun:
+        condition: service_healthy
     environment: *arr-env
     volumes:
       - /mnt/user/appdata/prowlarr:/config
@@ -198,7 +242,9 @@ services:
     image: lscr.io/linuxserver/overseerr:latest
     container_name: overseerr
     network_mode: "service:gluetun"
-    depends_on: [gluetun]
+    depends_on:
+      gluetun:
+        condition: service_healthy
     environment:
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
@@ -210,19 +256,43 @@ services:
     image: lscr.io/linuxserver/bazarr:latest
     container_name: bazarr
     network_mode: "service:gluetun"
-    depends_on: [gluetun]
+    depends_on:
+      gluetun:
+        condition: service_healthy
     environment: *arr-env
     volumes:
       - /mnt/user/appdata/bazarr:/config
       - /mnt/user/media/movies:/movies
       - /mnt/user/media/tv:/tv
     restart: unless-stopped
+  jellyfin-auto-collections:
+    image: ghcr.io/ghomashudson/jellyfin-auto-collections:latest
+    container_name: jellyfin-auto-collections
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy  # Wait for gluetun to be healthy
+      jellyfin:
+        condition: service_healthy  # Wait for jellyfin to be healthy
+    environment:
+      <<: *arr-env
+      CRONTAB: 0 0 * * *
+      TZ: America/New_York
+      JELLYFIN_SERVER_URL: ${JELLYFIN_SERVER_URL}
+      JELLYFIN_API_KEY: ${JELLYFIN_API_KEY}
+      JELLYFIN_USER_ID: ${JELLYFIN_USER_ID}
+    volumes:
+      - /mnt/user/appdata/jellyfin-auto-collections/config:/app/config
   # Port updater service for ProtonVPN dynamic port forwarding
   network-health:
     image: alpine:3.19
     container_name: network-health
     network_mode: "service:gluetun"
-    depends_on: [gluetun, qbittorrent]
+    depends_on:
+      gluetun:
+        condition: service_healthy
+      qbittorrent:
+        condition: service_started
     env_file:
       - ./.env
     entrypoint: /bin/sh -c
@@ -235,7 +305,7 @@ services:
         BT_PORT=${BT_PORT:-51413}  # Set default value if not provided
         echo "[CHECK] BitTorrent port $BT_PORT..."
         nc -z -w5 localhost $BT_PORT || echo "[ERROR] Port $BT_PORT closed"
-        
+
         echo "[CHECK] Gluetun health endpoint..."
         curl -sf http://localhost:9999/health || echo "[ERROR] Gluetun health endpoint unreachable"
 
