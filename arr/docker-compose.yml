@@ -25,12 +25,6 @@ services:
       - ./.env
     ports:
       - "8080:8080" # qbittorrent
-      - "8989:8989" # Sonarr
-      - "7878:7878" # Radarr
-      - "8787:8787" # Readarr
-      - "9696:9696" # Prowlarr
-      - "5055:5055" # overseerr
-      - "6767:6767" # bazarr
       - "51413:51413"  # BitTorrent listening port (TCP)
       - "51413:51413/udp"  # BitTorrent listening port (UDP)
       - "9999:9999/tcp"  # Health check server
@@ -77,53 +71,6 @@ services:
       traefik.http.routers.qbittorrent-secure.tls.certresolver:      letsencrypt
       traefik.http.routers.qbittorrent-secure.service:               qbittorrent-svc
       traefik.http.services.qbittorrent-svc.loadbalancer.server.port: "8080"
-      # Radarr
-      traefik.http.routers.radarr-secure.entrypoints:                websecure
-      traefik.http.routers.radarr-secure.rule:                       Host(`radarr.${DOMAIN_NAME}`)
-      traefik.http.routers.radarr-secure.tls:                        "true"
-      traefik.http.routers.radarr-secure.tls.certresolver:           letsencrypt
-      traefik.http.routers.radarr-secure.service:                    radarr-svc
-      traefik.http.services.radarr-svc.loadbalancer.server.port:     "7878"
-
-      # Sonarr
-      traefik.http.routers.sonarr-secure.entrypoints:                websecure
-      traefik.http.routers.sonarr-secure.rule:                       Host(`sonarr.${DOMAIN_NAME}`)
-      traefik.http.routers.sonarr-secure.tls:                        "true"
-      traefik.http.routers.sonarr-secure.tls.certresolver:           letsencrypt
-      traefik.http.routers.sonarr-secure.service:                    sonarr-svc
-      traefik.http.services.sonarr-svc.loadbalancer.server.port:     "8989"
-
-      # Readarr
-      traefik.http.routers.readarr-secure.entrypoints:               websecure
-      traefik.http.routers.readarr-secure.rule:                      Host(`readarr.${DOMAIN_NAME}`)
-      traefik.http.routers.readarr-secure.tls:                       "true"
-      traefik.http.routers.readarr-secure.tls.certresolver:          letsencrypt
-      traefik.http.routers.readarr-secure.service:                   readarr-svc
-      traefik.http.services.readarr-svc.loadbalancer.server.port:    "8787"
-
-      # Prowlarr
-      traefik.http.routers.prowlarr-secure.entrypoints:              websecure
-      traefik.http.routers.prowlarr-secure.rule:                     Host(`prowlarr.${DOMAIN_NAME}`)
-      traefik.http.routers.prowlarr-secure.tls:                      "true"
-      traefik.http.routers.prowlarr-secure.tls.certresolver:         letsencrypt
-      traefik.http.routers.prowlarr-secure.service:                  prowlarr-svc
-      traefik.http.services.prowlarr-svc.loadbalancer.server.port:   "9696"
-
-      # Overseerr
-      traefik.http.routers.overseerr-secure.entrypoints:             websecure
-      traefik.http.routers.overseerr-secure.rule:                    Host(`overseerr.${DOMAIN_NAME}`)
-      traefik.http.routers.overseerr-secure.tls:                     "true"
-      traefik.http.routers.overseerr-secure.tls.certresolver:        letsencrypt
-      traefik.http.routers.overseerr-secure.service:                 overseerr-svc
-      traefik.http.services.overseerr-svc.loadbalancer.server.port:  "5055"
-
-      # Bazarr
-      traefik.http.routers.bazarr-secure.entrypoints:                websecure
-      traefik.http.routers.bazarr-secure.rule:                       Host(`bazarr.${DOMAIN_NAME}`)
-      traefik.http.routers.bazarr-secure.tls:                        "true"
-      traefik.http.routers.bazarr-secure.tls.certresolver:           letsencrypt
-      traefik.http.routers.bazarr-secure.service:                    bazarr-svc
-      traefik.http.services.bazarr-svc.loadbalancer.server.port:     "6767"
   qbittorrent:
     image: linuxserver/qbittorrent:latest
     container_name: qbittorrent
@@ -179,65 +126,111 @@ services:
       traefik.http.services.jellyfin-svc.loadbalancer.server.port: "8096"
       traefik.http.middlewares.jellyfin-headers.headers.customResponseHeaders.X-Frame-Options: "SAMEORIGIN"
       traefik.http.routers.jellyfin-secure.middlewares: jellyfin-headers
-
   sonarr:
     image: linuxserver/sonarr:latest
     container_name: sonarr
-    network_mode: "service:gluetun"
     depends_on:
       gluetun:
         condition: service_healthy
     environment: *arr-env
+    ports:
+      - "8989:8989"
+    networks:
+      - traefik_proxy
     volumes:
       - /mnt/user/appdata/sonarr:/config
       - /mnt/user/media/tv:/tv
       - /mnt/user/media/downloads/qbittorrent:/downloads
     restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.sonarr-secure.entrypoints: websecure
+      traefik.http.routers.sonarr-secure.rule: Host(`sonarr.${DOMAIN_NAME}`)
+      traefik.http.routers.sonarr-secure.tls: "true"
+      traefik.http.routers.sonarr-secure.tls.certresolver: letsencrypt
+      traefik.http.routers.sonarr-secure.service: sonarr-svc
+      traefik.http.services.sonarr-svc.loadbalancer.server.port: "8989"
   radarr:
     image: linuxserver/radarr:latest
     container_name: radarr
-    network_mode: "service:gluetun"
     depends_on:
       gluetun:
         condition: service_healthy
     environment: *arr-env
+    networks:
+      - traefik_proxy
+    ports:
+      - "7878:7878"
     volumes:
       - /mnt/user/appdata/radarr:/config
       - /mnt/user/media/movies:/movies
       - /mnt/user/media/downloads/qbittorrent:/downloads
     restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.radarr-secure.entrypoints:                websecure
+      traefik.http.routers.radarr-secure.rule:                       Host(`radarr.${DOMAIN_NAME}`)
+      traefik.http.routers.radarr-secure.tls:                        "true"
+      traefik.http.routers.radarr-secure.tls.certresolver:           letsencrypt
+      traefik.http.routers.radarr-secure.service:                    radarr-svc
+      traefik.http.services.radarr-svc.loadbalancer.server.port:     "7878"
+
   readarr:
     image: ghcr.io/hotio/readarr:latest
     container_name: readarr
-    network_mode: "service:gluetun"
     depends_on:
       gluetun:
         condition: service_healthy
     environment: *arr-env
+    ports:
+      - "8787:8787"
+    networks:
+      - traefik_proxy
     volumes:
       - /mnt/user/appdata/readarr:/config
       - /mnt/user/media/books:/books
       - /mnt/user/media/downloads/qbittorrent:/downloads
     restart: unless-stopped
-
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.readarr-secure.entrypoints:               websecure
+      traefik.http.routers.readarr-secure.rule:                      Host(`readarr.${DOMAIN_NAME}`)
+      traefik.http.routers.readarr-secure.tls:                       "true"
+      traefik.http.routers.readarr-secure.tls.certresolver:          letsencrypt
+      traefik.http.routers.readarr-secure.service:                   readarr-svc
+      traefik.http.services.readarr-svc.loadbalancer.server.port:    "8787"
   prowlarr:
     image: linuxserver/prowlarr:latest
     container_name: prowlarr
-    network_mode: "service:gluetun"
     depends_on:
       gluetun:
         condition: service_healthy
     environment: *arr-env
+    networks:
+      - traefik_proxy
+    ports:
+      - "9696:9696"
     volumes:
       - /mnt/user/appdata/prowlarr:/config
     restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.prowlarr-secure.entrypoints:              websecure
+      traefik.http.routers.prowlarr-secure.rule:                     Host(`prowlarr.${DOMAIN_NAME}`)
+      traefik.http.routers.prowlarr-secure.tls:                      "true"
+      traefik.http.routers.prowlarr-secure.tls.certresolver:         letsencrypt
+      traefik.http.routers.prowlarr-secure.service:                  prowlarr-svc
+      traefik.http.services.prowlarr-svc.loadbalancer.server.port:   "9696"
   overseerr:
     image: lscr.io/linuxserver/overseerr:latest
     container_name: overseerr
-    network_mode: "service:gluetun"
     depends_on:
       gluetun:
         condition: service_healthy
+    networks:
+      - traefik_proxy
+    ports:
+      - "5055:5055"
     environment:
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
@@ -245,19 +238,38 @@ services:
     volumes:
       - /mnt/user/appdata/overseerr/config:/config
     restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.overseerr-secure.entrypoints:             websecure
+      traefik.http.routers.overseerr-secure.rule:                    Host(`overseerr.${DOMAIN_NAME}`)
+      traefik.http.routers.overseerr-secure.tls:                     "true"
+      traefik.http.routers.overseerr-secure.tls.certresolver:        letsencrypt
+      traefik.http.routers.overseerr-secure.service:                 overseerr-svc
+      traefik.http.services.overseerr-svc.loadbalancer.server.port:  "5055"
   bazarr:
     image: lscr.io/linuxserver/bazarr:latest
     container_name: bazarr
-    network_mode: "service:gluetun"
     depends_on:
       gluetun:
         condition: service_healthy
     environment: *arr-env
+    networks:
+      - traefik_proxy
+    ports:
+      - "6767:6767"
     volumes:
       - /mnt/user/appdata/bazarr:/config
       - /mnt/user/media/movies:/movies
       - /mnt/user/media/tv:/tv
     restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.bazarr-secure.entrypoints:                websecure
+      traefik.http.routers.bazarr-secure.rule:                       Host(`bazarr.${DOMAIN_NAME}`)
+      traefik.http.routers.bazarr-secure.tls:                        "true"
+      traefik.http.routers.bazarr-secure.tls.certresolver:           letsencrypt
+      traefik.http.routers.bazarr-secure.service:                    bazarr-svc
+      traefik.http.services.bazarr-svc.loadbalancer.server.port:     "6767"
   # jellyfin-auto-collections:
   #   image: ghcr.io/ghomashudson/jellyfin-auto-collections:latest
   #   container_name: jellyfin-auto-collections
