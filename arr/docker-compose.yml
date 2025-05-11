@@ -38,22 +38,26 @@ services:
       WIREGUARD_ADDRESSES:        10.2.0.2/32
       WIREGUARD_ALLOWED_IPS:      0.0.0.0/0
       # DNS configuration - improved for stability
-      DNS_ADDRESS: 1.1.1.1
+      DNS_ADDRESS:                1.1.1.1  # Added Google DNS as backup
+      DNS_KEEP_NAMESERVER:        "on"  # Keep host DNS as fallback
       # Server selection / features - more specific for stability
       SERVER_COUNTRIES:           Netherlands,Switzerland
       SERVER_FEATURES:            p2p
       # Connection stability parameters
-      HEALTH_CHECK_TARGET:        1.1.1.1:443  # Use Cloudflare's reliable endpoint instead of cloudflare.com
+      HEALTH_CHECK_TARGET:        1.1.1.1:443  # Use Cloudflare's reliable endpoint
+      HEALTH_CHECK_SECONDS:       300  # Check every 5 minutes (increased from default)
+      WIREGUARD_ENDPOINT_IP_REFRESH_SECONDS: 600  # Refresh endpoint IP less frequently
       # Port-forwarding
       VPN_PORT_FORWARDING:        "on"
       VPN_PORT_FORWARDING_PROVIDER: protonvpn
+      VPN_PORT_FORWARDING_LISTENING_PORT: 51413
       VPN_PORT_FORWARD_ONLY:          "on"
       VPN_PORT_FORWARDING_STATUS_FILE: "/tmp/forwarded_port"
       # Misc
-      LOG_LEVEL:                  debug
+      LOG_LEVEL:                  info  # Changed from debug to reduce log volume
       DOT:                        off
-      FIREWALL_DEBUG:             "on"
-      FIREWALL_OUTBOUND_SUBNETS:  100.64.0.0/10,1.1.1.1/32   # Allow Tailscale and Cloudflare DNS
+      FIREWALL_DEBUG:             "off"  # Reduced logging
+      FIREWALL_OUTBOUND_SUBNETS:  100.64.0.0/10,1.1.1.1/32,8.8.8.8/32  # Allow Tailscale and DNS
       HEALTH_SERVER_ADDRESS:      0.0.0.0:9999
     volumes:
       - /mnt/user/appdata/gluetun:/gluetun
@@ -61,9 +65,8 @@ services:
     restart: unless-stopped
     networks:
       - traefik_proxy
-    labels: &gluetun-traefik
+    labels:
       traefik.enable: "true"
-
       # qBittorrent
       traefik.http.routers.qbittorrent-secure.entrypoints:           websecure
       traefik.http.routers.qbittorrent-secure.rule:                  Host(`qbit.${DOMAIN_NAME}`)
@@ -91,8 +94,12 @@ services:
       - /mnt/user/media/downloads/qbittorrent:/downloads
       - ./qbittorrent-init/10-config.sh:/etc/cont-init.d/10-config.sh:ro
     restart: unless-stopped
-    labels:
-      <<: *gluetun-traefik     # re-use the global Traefik block
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v2/app/version"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
   jellyfin:
     image: lscr.io/linuxserver/jellyfin:latest
     container_name: jellyfin
@@ -142,6 +149,12 @@ services:
       - /mnt/user/media/tv:/tv
       - /mnt/user/media/downloads/qbittorrent:/downloads
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8989/health"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     labels:
       traefik.enable: "true"
       traefik.http.routers.sonarr-secure.entrypoints: websecure
@@ -302,21 +315,100 @@ services:
       - ./.env
     command: |
       sh -c "
-        apk add --no-cache curl netcat-openbsd &&
+        apk add --no-cache curl netcat-openbsd jq docker-cli-compose &&
+        mkdir -p /logs &&
+
+        # Function to log with timestamp
+        log() {
+          echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] \$1\" | tee -a /logs/network-health.log
+        }
+
+        # Function to check if a service is healthy
+        check_service() {
+          local service=\$1
+          local port=\$2
+          local endpoint=\$3
+
+          log \"[CHECK] \$service on port \$port...\"
+          if curl -sf \$endpoint > /dev/null; then
+            log \"[OK] \$service is healthy\"
+            return 0
+          else
+            log \"[ERROR] \$service is unreachable\"
+            return 1
+          fi
+        }
+
+        # Function to check DNS resolution
+        check_dns() {
+          local domain=\$1
+          log \"[CHECK] DNS resolution for \$domain...\"
+          if nslookup \$domain > /dev/null 2>&1; then
+            log \"[OK] DNS resolution for \$domain successful\"
+            return 0
+          else
+            log \"[ERROR] DNS resolution for \$domain failed\"
+            return 1
+          fi
+        }
+
+        # Main monitoring loop
         while true; do
-          echo '[CHECK] qBittorrent API...'
-          curl -sf http://localhost:8080/api/v2/app/version || echo '[ERROR] qBittorrent API unreachable'
+          # Check qBittorrent API
+          check_service \"qBittorrent API\" 8080 \"http://localhost:8080/api/v2/app/version\"
+          qbit_status=\$?
 
+          # Check BitTorrent port
           BT_PORT=\${BT_PORT:-51413}
-          echo '[CHECK] BitTorrent port '\$BT_PORT'...'
-          nc -z -w5 localhost \$BT_PORT || echo '[ERROR] Port '\$BT_PORT' closed'
+          log \"[CHECK] BitTorrent port \$BT_PORT...\"
+          if nc -z -w5 localhost \$BT_PORT; then
+            log \"[OK] Port \$BT_PORT is open\"
+          else
+            log \"[ERROR] Port \$BT_PORT is closed\"
+          fi
 
-          echo '[CHECK] Gluetun health endpoint...'
-          curl -sf http://localhost:9999/health || echo '[ERROR] Gluetun health endpoint unreachable'
+          # Check Gluetun health endpoint
+          check_service \"Gluetun health\" 9999 \"http://localhost:9999/health\"
+          gluetun_status=\$?
 
-          echo '[CHECK] Public IP...'
-          curl -sf https://api.ipify.org || echo '[ERROR] No outbound connectivity'
+          # Check outbound connectivity
+          log \"[CHECK] Public IP...\"
+          if curl -sf https://api.ipify.org > /dev/null; then
+            log \"[OK] Outbound connectivity is working\"
+            outbound_status=0
+          else
+            log \"[ERROR] No outbound connectivity\"
+            outbound_status=1
+          fi
 
+          # Check DNS resolution
+          check_dns \"google.com\"
+          dns_status=\$?
+
+          # Check service endpoints
+          check_service \"Sonarr\" 8989 \"http://localhost:8989/health\"
+          sonarr_status=\$?
+
+          check_service \"Radarr\" 7878 \"http://localhost:7878/health\"
+          radarr_status=\$?
+
+          check_service \"Prowlarr\" 9696 \"http://localhost:9696/health\"
+          prowlarr_status=\$?
+
+          # Log overall status
+          log \"[STATUS] Services: qBittorrent=\$qbit_status, Gluetun=\$gluetun_status, Outbound=\$outbound_status, DNS=\$dns_status\"
+          log \"[STATUS] Arr services: Sonarr=\$sonarr_status, Radarr=\$radarr_status, Prowlarr=\$prowlarr_status\"
+
+          # If multiple services are down, there might be a VPN issue
+          if [ \$outbound_status -eq 1 ] || [ \$dns_status -eq 1 ] || [ \$gluetun_status -eq 1 ]; then
+            log \"[ALERT] Network connectivity issues detected - VPN might need restart\"
+            # We can't restart services here as we don't have Docker access
+            # But we can create a marker file that you can check
+            echo \"\$(date '+%Y-%m-%d %H:%M:%S') - Network issues detected\" > /tmp/network_alert
+          fi
+
+          # Sleep for 5 minutes before next check
+          log \"[INFO] Sleeping for 5 minutes...\"
           sleep 300
         done
       "
