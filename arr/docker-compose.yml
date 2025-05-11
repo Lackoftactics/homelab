@@ -15,7 +15,7 @@ networks:
 
 services:
   gluetun:
-    image: qmcgaw/gluetun:v3.40
+    image: qmcgaw/gluetun:v3.40.0
     container_name: gluetun
     cap_add:
       - NET_ADMIN
@@ -35,26 +35,17 @@ services:
       WIREGUARD_PUBLIC_KEY:       ${WG_PUBLIC_KEY}
       WIREGUARD_ADDRESSES:        ${WG_ADDRESSES:-10.2.0.2/32}
       WIREGUARD_PERSISTENT_KEEPALIVE_INTERVAL: 15s
-      # DNS configuration - improved for stability
-      DNS_ADDRESS:                1.1.1.1
-      # Server selection / features - more specific for stability
       SERVER_COUNTRIES:           Netherlands,Switzerland
       SERVER_FEATURES:            p2p
-      # Connection stability parameters
-      HEALTH_CHECK_TARGET:        1.1.1.1:443  # Use Cloudflare's reliable endpoint
-      HEALTH_CHECK_SECONDS:       300  # Check every 5 minutes (increased from default)
-      WIREGUARD_ENDPOINT_IP_REFRESH_SECONDS: 600  # Refresh endpoint IP less frequently
       # Port-forwarding
       VPN_PORT_FORWARDING:        "on"
       VPN_PORT_FORWARDING_PROVIDER: protonvpn
-      VPN_PORT_FORWARD_ONLY:          "on"
+      VPN_PORT_FORWARD_ONLY:      "on"
       PORT_FORWARD_ONLY:          "on"
       # Misc
       LOG_LEVEL:                  info  # Changed from debug to reduce log volume
-      DOT:                        off
-      FIREWALL_DEBUG:             "off"  # Reduced logging
-      HEALTH_SERVER_ADDRESS:      0.0.0.0:9999
       VPN_PORT_FORWARDING_UP_COMMAND: /bin/sh -c 'wget -O- --retry-connrefused --post-data "json={\"listen_port\":{{PORTS}}}" http://127.0.0.1:8080/api/v2/app/setPreferences 2>&1'
+      UPDATER_PERIOD: 24h
     volumes:
       - /mnt/user/appdata/gluetun:/gluetun
     restart: unless-stopped
@@ -310,116 +301,18 @@ services:
       - ./.env
     command: |
       sh -c "
-        apk add --no-cache curl netcat-openbsd jq docker-cli-compose &&
-        mkdir -p /logs &&
-
-        # Function to log with timestamp
-        log() {
-          echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] \$1\" | tee -a /logs/network-health.log
-        }
-
-        # Function to check if a service is healthy
-        check_service() {
-          local service=\$1
-          local port=\$2
-          local endpoint=\$3
-
-          log \"[CHECK] \$service on port \$port...\"
-          if curl -sf \$endpoint > /dev/null; then
-            log \"[OK] \$service is healthy\"
-            return 0
-          else
-            log \"[ERROR] \$service is unreachable\"
-            return 1
-          fi
-        }
-
-        # Function to check DNS resolution
-        check_dns() {
-          local domain=\$1
-          log \"[CHECK] DNS resolution for \$domain...\"
-          if nslookup \$domain > /dev/null 2>&1; then
-            log \"[OK] DNS resolution for \$domain successful\"
-            return 0
-          else
-            log \"[ERROR] DNS resolution for \$domain failed\"
-            return 1
-          fi
-        }
-
-        # Main monitoring loop
+        apk add --no-cache curl && \
+        echo 'Network health monitor initialized. Starting periodic checks...' && \
+        mkdir -p /logs && \
         while true; do
-          # Check qBittorrent API
-          check_service \"qBittorrent API\" 8080 \"http://localhost:8080/api/v2/app/version\"
-          qbit_status=\$?
+          TIMESTAMP=\$$(date '+%Y-%m-%d %H:%M:%S')
+          EXTERNAL_IP=\$$(curl -sf https://api.ipify.org || echo 'Error: Failed to retrieve IP')
+          LOG_MSG=\"[\$$TIMESTAMP] External IP via Gluetun: \$$EXTERNAL_IP\"
 
-          # Check BitTorrent port
-          BT_PORT=\${BT_PORT:-51413}
-          log \"[CHECK] BitTorrent port \$BT_PORT...\"
-          if nc -z -w5 localhost \$BT_PORT; then
-            log \"[OK] Port \$BT_PORT is open\"
-          else
-            log \"[ERROR] Port \$BT_PORT is closed\"
-          fi
+          echo \"\$$LOG_MSG\" # Log to container stdout
+          echo \"\$$LOG_MSG\" >> /logs/network-status.log # Log to file in volume
 
-          # Check forwarded port from file
-          if [ -f \"/tmp/forwarded_port\" ]; then
-            FORWARDED_PORT=\$(cat /tmp/forwarded_port)
-            log \"[INFO] Current forwarded port: \$FORWARDED_PORT\"
-
-            # Check if forwarded port is open
-            if nc -z -w5 localhost \$FORWARDED_PORT; then
-              log \"[OK] Forwarded port \$FORWARDED_PORT is open\"
-            else
-              log \"[WARNING] Forwarded port \$FORWARDED_PORT is closed\"
-            fi
-          else
-            log \"[WARNING] No forwarded port file found\"
-          fi
-
-          # Check Gluetun health endpoint
-          check_service \"Gluetun health\" 9999 \"http://localhost:9999/health\"
-          gluetun_status=\$?
-
-          # Check outbound connectivity
-          log \"[CHECK] Public IP...\"
-          if curl -sf https://api.ipify.org > /dev/null; then
-            log \"[OK] Outbound connectivity is working\"
-            outbound_status=0
-          else
-            log \"[ERROR] No outbound connectivity\"
-            outbound_status=1
-          fi
-
-          # Check DNS resolution
-          check_dns \"google.com\"
-          dns_status=\$?
-
-          # Check service endpoints
-          check_service \"Sonarr\" 8989 \"http://localhost:8989/health\"
-          sonarr_status=\$?
-
-          check_service \"Radarr\" 7878 \"http://localhost:7878/health\"
-          radarr_status=\$?
-
-          check_service \"Prowlarr\" 9696 \"http://localhost:9696/health\"
-          prowlarr_status=\$?
-
-          # Log overall status
-          log \"[STATUS] Services: qBittorrent=\$qbit_status, Gluetun=\$gluetun_status, Outbound=\$outbound_status, DNS=\$dns_status\"
-          log \"[STATUS] Arr services: Sonarr=\$sonarr_status, Radarr=\$radarr_status, Prowlarr=\$prowlarr_status\"
-
-          # If multiple services are down, there might be a VPN issue
-          if [ \$outbound_status -eq 1 ] || [ \$dns_status -eq 1 ] || [ \$gluetun_status -eq 1 ]; then
-            log \"[ALERT] Network connectivity issues detected - VPN might need restart\"
-            # We can't restart services here as we don't have Docker access
-            # But we can create a marker file that you can check
-            echo \"\$(date '+%Y-%m-%d %H:%M:%S') - Network issues detected\" > /tmp/network_alert
-          fi
-
-          # Sleep for 3 minutes before next check
-          log \"[INFO] Sleeping for 3 minutes...\"
-          sleep 180
+          sleep 300 # Check every 5 minutes (300 seconds)
         done
       "
     volumes:
