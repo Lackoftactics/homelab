@@ -25,8 +25,6 @@ services:
       - ./.env
     ports:
       - "8080:8080" # qbittorrent
-      - "51413:51413"  # BitTorrent listening port (TCP)
-      - "51413:51413/udp"  # BitTorrent listening port (UDP)
       - "9999:9999/tcp"  # Health check server
     environment:
       TZ:                         ${TZ}
@@ -35,11 +33,10 @@ services:
       VPN_TYPE:                   wireguard
       WIREGUARD_PRIVATE_KEY:      ${WG_PRIVATE_KEY}
       WIREGUARD_PUBLIC_KEY:       ${WG_PUBLIC_KEY}
-      WIREGUARD_ADDRESSES:        10.2.0.2/32
-      WIREGUARD_ALLOWED_IPS:      0.0.0.0/0
+      WIREGUARD_ADDRESSES:        ${WG_ADDRESSES:-10.2.0.2/32}
+      WIREGUARD_PERSISTENT_KEEPALIVE_INTERVAL: 15s
       # DNS configuration - improved for stability
-      DNS_ADDRESS:                1.1.1.1  # Added Google DNS as backup
-      DNS_KEEP_NAMESERVER:        "on"  # Keep host DNS as fallback
+      DNS_ADDRESS:                1.1.1.1
       # Server selection / features - more specific for stability
       SERVER_COUNTRIES:           Netherlands,Switzerland
       SERVER_FEATURES:            p2p
@@ -50,18 +47,16 @@ services:
       # Port-forwarding
       VPN_PORT_FORWARDING:        "on"
       VPN_PORT_FORWARDING_PROVIDER: protonvpn
-      VPN_PORT_FORWARDING_LISTENING_PORT: 51413
       VPN_PORT_FORWARD_ONLY:          "on"
-      VPN_PORT_FORWARDING_STATUS_FILE: "/tmp/forwarded_port"
+      PORT_FORWARD_ONLY:          "on"
       # Misc
       LOG_LEVEL:                  info  # Changed from debug to reduce log volume
       DOT:                        off
       FIREWALL_DEBUG:             "off"  # Reduced logging
-      FIREWALL_OUTBOUND_SUBNETS:  100.64.0.0/10,1.1.1.1/32,8.8.8.8/32  # Allow Tailscale and DNS
       HEALTH_SERVER_ADDRESS:      0.0.0.0:9999
+      VPN_PORT_FORWARDING_UP_COMMAND: /bin/sh -c 'wget -O- --retry-connrefused --post-data "json={\"listen_port\":{{PORTS}}}" http://127.0.0.1:8080/api/v2/app/setPreferences 2>&1'
     volumes:
       - /mnt/user/appdata/gluetun:/gluetun
-      - /mnt/user/appdata/gluetun/forwarded_port:/tmp/forwarded_port
     restart: unless-stopped
     networks:
       - traefik_proxy
@@ -367,6 +362,21 @@ services:
             log \"[ERROR] Port \$BT_PORT is closed\"
           fi
 
+          # Check forwarded port from file
+          if [ -f \"/tmp/forwarded_port\" ]; then
+            FORWARDED_PORT=\$(cat /tmp/forwarded_port)
+            log \"[INFO] Current forwarded port: \$FORWARDED_PORT\"
+
+            # Check if forwarded port is open
+            if nc -z -w5 localhost \$FORWARDED_PORT; then
+              log \"[OK] Forwarded port \$FORWARDED_PORT is open\"
+            else
+              log \"[WARNING] Forwarded port \$FORWARDED_PORT is closed\"
+            fi
+          else
+            log \"[WARNING] No forwarded port file found\"
+          fi
+
           # Check Gluetun health endpoint
           check_service \"Gluetun health\" 9999 \"http://localhost:9999/health\"
           gluetun_status=\$?
@@ -407,12 +417,11 @@ services:
             echo \"\$(date '+%Y-%m-%d %H:%M:%S') - Network issues detected\" > /tmp/network_alert
           fi
 
-          # Sleep for 5 minutes before next check
-          log \"[INFO] Sleeping for 5 minutes...\"
-          sleep 300
+          # Sleep for 3 minutes before next check
+          log \"[INFO] Sleeping for 3 minutes...\"
+          sleep 180
         done
       "
     volumes:
       - /mnt/user/appdata/network-health:/logs
-      - /tmp:/tmp
     restart: unless-stopped
