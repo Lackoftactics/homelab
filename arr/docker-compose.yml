@@ -362,21 +362,21 @@ services:
     networks:
       - arr_internal
 
-  # VPN connection monitor and auto-healer
-  vpn-monitor:
-    build: ./vpn-monitor
-    container_name: vpn-monitor
-    <<: *restart-policy
-    depends_on:
-      gluetun:
-        condition: service_healthy
-      qbittorrent:
-        condition: service_started
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /mnt/user/appdata/vpn-monitor:/var/log
-    networks:
-      - vpn_network
-      - arr_internal
-    # Add privileged mode to ensure Docker socket access works properly
-    privileged: true
+  # VPN connection monitor and auto-healer - DISABLED
+  # vpn-monitor:
+  #   build: ./vpn-monitor
+  #   container_name: vpn-monitor
+  #   <<: *restart-policy
+  #   depends_on:
+  #     gluetun:
+  #       condition: service_healthy
+  #     qbittorrent:
+  #       condition: service_started
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #     - /mnt/user/appdata/vpn-monitor:/var/log
+  #   networks:
+  #     - vpn_network
+  #     - arr_internal
+  #   # Add privileged mode to ensure Docker socket access works properly
+  #   privileged: true
