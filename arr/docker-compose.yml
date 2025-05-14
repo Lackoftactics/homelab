@@ -342,34 +342,45 @@ services:
   #     JELLYFIN_USER_ID: ${JELLYFIN_USER_ID}
   #   volumes:
   #     - /mnt/user/appdata/jellyfin-auto-collections/config:/app/config
-  # Port updater service for ProtonVPN dynamic port forwarding
-  network-health:
-    image: alpine:3.19
-    container_name: network-health
-    network_mode: "service:gluetun"
+  # Removed redundant network-health container as its functionality
+  # is now covered by the more comprehensive vpn-monitor container
+
+  # Auto-healing container for the entire stack
+  auto-heal:
+    image: willfarrell/autoheal:latest
+    container_name: auto-heal
+    <<: *restart-policy
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: all
+      AUTOHEAL_INTERVAL: 60
+      AUTOHEAL_START_PERIOD: 300
+      AUTOHEAL_DEFAULT_STOP_TIMEOUT: 30
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - arr_internal
+
+  # VPN connection monitor and auto-healer
+  vpn-monitor:
+    image: alpine:latest
+    container_name: vpn-monitor
+    <<: *restart-policy
     depends_on:
       gluetun:
-        condition: service_healthy
+        condition: service_started
       qbittorrent:
         condition: service_started
-    env_file:
-      - ./.env
+    volumes:
+      - ./vpn-monitor.sh:/vpn-monitor.sh:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /mnt/user/appdata/vpn-monitor:/var/log
+    networks:
+      - vpn_network
+      - arr_internal
     command: |
       sh -c "
-        apk add --no-cache curl && \
-        echo 'Network health monitor initialized. Starting periodic checks...' && \
-        mkdir -p /logs && \
-        while true; do
-          TIMESTAMP=\$$(date '+%Y-%m-%d %H:%M:%S')
-          EXTERNAL_IP=\$$(curl -sf https://api.ipify.org || echo 'Error: Failed to retrieve IP')
-          LOG_MSG=\"[\$$TIMESTAMP] External IP via Gluetun: \$$EXTERNAL_IP\"
-
-          echo \"\$$LOG_MSG\" # Log to container stdout
-          echo \"\$$LOG_MSG\" >> /logs/network-status.log # Log to file in volume
-
-          sleep 300 # Check every 5 minutes (300 seconds)
-        done
+        apk add --no-cache bash curl docker-cli && \
+        chmod +x /vpn-monitor.sh && \
+        echo 'Starting VPN monitor service' && \
+        /vpn-monitor.sh
       "
-    volumes:
-      - /mnt/user/appdata/network-health:/logs
-    restart: unless-stopped
