@@ -362,25 +362,19 @@ services:
 
   # VPN connection monitor and auto-healer
   vpn-monitor:
-    image: alpine:latest
+    build: ./vpn-monitor
     container_name: vpn-monitor
     <<: *restart-policy
     depends_on:
       gluetun:
-        condition: service_started
+        condition: service_healthy
       qbittorrent:
         condition: service_started
     volumes:
-      - ./vpn-monitor.sh:/vpn-monitor.sh:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - /mnt/user/appdata/vpn-monitor:/var/log
     networks:
       - vpn_network
       - arr_internal
-    command: |
-      sh -c "
-        apk add --no-cache bash curl docker-cli && \
-        chmod +x /vpn-monitor.sh && \
-        echo 'Starting VPN monitor service' && \
-        /vpn-monitor.sh
-      "
+    # Add privileged mode to ensure Docker socket access works properly
+    privileged: true
