@@ -67,6 +67,7 @@ services:
       VPN_PORT_FORWARD_ONLY:      "on"
       PORT_FORWARD_ONLY:          "on"
       FIREWALL_VPN_INPUT_PORTS:    "8080,9999"
+      HEALTH_SERVER_ADDRESS: 0.0.0.0:9999
       # Improved stability and reliability settings
       LOG_LEVEL:                  info
       VPN_PORT_FORWARDING_UP_COMMAND: /bin/sh -c 'wget -O- --retry-connrefused --wait=5 --tries=10 --post-data "json={\"listen_port\":{{PORTS}}}" http://127.0.0.1:8080/api/v2/app/setPreferences 2>&1'
