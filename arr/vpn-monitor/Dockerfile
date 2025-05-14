@@ -1,7 +1,7 @@
 FROM alpine:latest
 
 # Install required packages
-RUN apk add --no-cache bash curl docker-cli grep jq
+RUN apk add --no-cache bash curl docker-cli grep jq bind-tools iputils
 
 # Create directories
 RUN mkdir -p /var/log

@@ -6,9 +6,21 @@
 CHECK_INTERVAL=300  # Check every 5 minutes
 MAX_FAILURES=3      # Number of consecutive failures before taking action
 LOG_FILE="/var/log/vpn-monitor.log"
-HEALTH_ENDPOINT="http://localhost:9999/health"
+HEALTH_ENDPOINT="http://gluetun:9999/health"
 EXTERNAL_CHECK_URL="https://api.ipify.org"
-QBITTORRENT_API="http://localhost:8080/api/v2/app/version"
+QBITTORRENT_API="http://gluetun:8080/api/v2/app/version"
+
+# Debug information
+log_debug() {
+    echo "[DEBUG] $(date '+%Y-%m-%d %H:%M:%S') $1" | tee -a "$LOG_FILE"
+}
+
+# Print network diagnostic information
+log_debug "Starting network diagnostics..."
+log_debug "Checking DNS resolution..."
+nslookup gluetun || echo "DNS resolution for gluetun failed"
+log_debug "Checking connectivity to gluetun..."
+ping -c 2 gluetun || echo "Cannot ping gluetun"
 
 # Ensure we have proper permissions for Docker socket
 if [ ! -w "/var/run/docker.sock" ]; then
@@ -28,26 +40,47 @@ log() {
 }
 
 check_vpn_connection() {
-    # Check gluetun health endpoint
-    if ! curl -sf "$HEALTH_ENDPOINT" > /dev/null; then
+    # Check gluetun health endpoint with verbose output for debugging
+    log_debug "Checking gluetun health endpoint: $HEALTH_ENDPOINT"
+    HEALTH_RESPONSE=$(curl -v "$HEALTH_ENDPOINT" 2>&1)
+    HEALTH_STATUS=$?
+    log_debug "Health endpoint response: $HEALTH_RESPONSE"
+    log_debug "Health endpoint status code: $HEALTH_STATUS"
+
+    if [ $HEALTH_STATUS -ne 0 ]; then
         log "ERROR: Gluetun health endpoint not responding"
         return 1
     fi
 
     # Check if VPN is connected according to gluetun
-    if ! curl -sf "$HEALTH_ENDPOINT" | grep -q '"vpn_connected":true'; then
+    VPN_STATUS=$(curl -sf "$HEALTH_ENDPOINT")
+    log_debug "VPN status response: $VPN_STATUS"
+
+    if ! echo "$VPN_STATUS" | grep -q '"vpn_connected":true'; then
         log "ERROR: VPN is not connected according to gluetun"
         return 1
     fi
 
     # Check external connectivity
-    if ! curl -sf "$EXTERNAL_CHECK_URL" > /dev/null; then
+    log_debug "Checking external connectivity: $EXTERNAL_CHECK_URL"
+    EXTERNAL_RESPONSE=$(curl -v "$EXTERNAL_CHECK_URL" 2>&1)
+    EXTERNAL_STATUS=$?
+    log_debug "External connectivity response: $EXTERNAL_RESPONSE"
+    log_debug "External connectivity status code: $EXTERNAL_STATUS"
+
+    if [ $EXTERNAL_STATUS -ne 0 ]; then
         log "ERROR: Cannot reach external services"
         return 1
     fi
 
     # Check qBittorrent connectivity
-    if ! curl -sf "$QBITTORRENT_API" > /dev/null; then
+    log_debug "Checking qBittorrent API: $QBITTORRENT_API"
+    QB_RESPONSE=$(curl -v "$QBITTORRENT_API" 2>&1)
+    QB_STATUS=$?
+    log_debug "qBittorrent API response: $QB_RESPONSE"
+    log_debug "qBittorrent API status code: $QB_STATUS"
+
+    if [ $QB_STATUS -ne 0 ]; then
         log "WARNING: qBittorrent API not responding"
         # This is just a warning, not a failure
     fi
