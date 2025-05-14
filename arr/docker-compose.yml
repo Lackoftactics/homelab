@@ -6,17 +6,40 @@ x-arr-env: &arr-env
   PGID: ${PGID:-100}
   TZ:  ${TZ:-Europe/Warsaw}
 
+# Common restart policy for auto-healing
+x-restart-policy: &restart-policy
+  restart: unless-stopped
+
+# Common healthcheck for arr services
+x-arr-healthcheck: &arr-healthcheck
+  healthcheck:
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 30s
+
 ###############################################################################
 # Network
 ###############################################################################
 networks:
+  # External network for Traefik and web interfaces
   traefik_proxy:
     external: true
+
+  # Internal network for arr services to communicate with each other
+  arr_internal:
+    driver: bridge
+    internal: true
+
+  # VPN network for torrent traffic
+  vpn_network:
+    driver: bridge
 
 services:
   gluetun:
     image: qmcgaw/gluetun:v3.40.0
     container_name: gluetun
+    <<: *restart-policy
     cap_add:
       - NET_ADMIN
     devices:
@@ -34,7 +57,8 @@ services:
       WIREGUARD_PRIVATE_KEY:      ${WG_PRIVATE_KEY}
       WIREGUARD_PUBLIC_KEY:       ${WG_PUBLIC_KEY}
       WIREGUARD_ADDRESSES:        ${WG_ADDRESSES:-10.2.0.2/32}
-      WIREGUARD_PERSISTENT_KEEPALIVE_INTERVAL: 15s
+      # Improved stability settings
+      WIREGUARD_PERSISTENT_KEEPALIVE_INTERVAL: 25s # Increased for better stability
       SERVER_COUNTRIES:           Netherlands,Switzerland
       SERVER_FEATURES:            p2p
       # Port-forwarding
@@ -42,15 +66,21 @@ services:
       VPN_PORT_FORWARDING_PROVIDER: protonvpn
       VPN_PORT_FORWARD_ONLY:      "on"
       PORT_FORWARD_ONLY:          "on"
-      # Misc
-      LOG_LEVEL:                  info  # Changed from debug to reduce log volume
-      VPN_PORT_FORWARDING_UP_COMMAND: /bin/sh -c 'wget -O- --retry-connrefused --post-data "json={\"listen_port\":{{PORTS}}}" http://127.0.0.1:8080/api/v2/app/setPreferences 2>&1'
-      UPDATER_PERIOD: 24h
+      # Improved stability and reliability settings
+      LOG_LEVEL:                  info
+      VPN_PORT_FORWARDING_UP_COMMAND: /bin/sh -c 'wget -O- --retry-connrefused --wait=5 --tries=10 --post-data "json={\"listen_port\":{{PORTS}}}" http://127.0.0.1:8080/api/v2/app/setPreferences 2>&1'
+      UPDATER_PERIOD:             24h
     volumes:
       - /mnt/user/appdata/gluetun:/gluetun
-    restart: unless-stopped
     networks:
       - traefik_proxy
+      - vpn_network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9999/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     labels:
       traefik.enable: "true"
       # qBittorrent
@@ -75,13 +105,14 @@ services:
       WEBUI_USERNAME:   ${QB_USERNAME:-admin}
       WEBUI_PASSWORD:   ${QB_PASSWORD:-adminadmin}
       TORRENTING_PORT:  51413
+      BIND_TO_INTERFACE: tun0  # Bind qBittorrent to the VPN interface
     volumes:
       - /mnt/user/appdata/qbittorrent:/config
       - /mnt/user/media/downloads/qbittorrent:/downloads
       - ./qbittorrent-init/10-config.sh:/etc/cont-init.d/10-config.sh:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v2/app/version"]
+      test: ["CMD", "bash", "-c", "curl -f http://localhost:8080/api/v2/app/version && ping -c1 1.1.1.1"]
       interval: 1m
       timeout: 10s
       retries: 3
@@ -269,6 +300,30 @@ services:
       traefik.http.routers.bazarr-secure.tls.certresolver:           letsencrypt
       traefik.http.routers.bazarr-secure.service:                    bazarr-svc
       traefik.http.services.bazarr-svc.loadbalancer.server.port:     "6767"
+  lingarr:
+    image: lingarr/lingarr:latest
+    container_name: lingarr
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    restart: unless-stopped
+    environment: *arr-env
+    ports:
+      - "9876:9876"
+    volumes:
+      - /mnt/user/media/movies:/movies
+      - /mnt/user/media/tv:/tv
+      - /mnt/user/appdata/lingarr:/app/config
+    networks:
+      - traefik_proxy
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.lingarr-secure.entrypoints:               websecure
+      traefik.http.routers.lingarr-secure.rule:                      Host(`lingarr.${DOMAIN_NAME}`)
+      traefik.http.routers.lingarr-secure.tls:                       "true"
+      traefik.http.routers.lingarr-secure.tls.certresolver:          letsencrypt
+      traefik.http.routers.lingarr-secure.service:                   lingarr-svc
+      traefik.http.services.lingarr-svc.loadbalancer.server.port:    "9876"
   # jellyfin-auto-collections:
   #   image: ghcr.io/ghomashudson/jellyfin-auto-collections:latest
   #   container_name: jellyfin-auto-collections
