@@ -309,7 +309,9 @@ services:
       gluetun:
         condition: service_healthy
     restart: unless-stopped
-    environment: *arr-env
+    environment:
+      <<: *arr-env
+      ASPNETCORE_URLS: http://+:9876
     ports:
       - "9876:9876"
     volumes:
