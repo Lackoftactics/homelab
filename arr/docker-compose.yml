@@ -48,6 +48,7 @@ services:
       - ./.env
     ports:
       - "8080:8080" # qbittorrent
+      - "9696:9696" # prowlarr
       - "9999:9999/tcp"  # Health check server
     environment:
       TZ:                         ${TZ}
@@ -66,8 +67,10 @@ services:
       VPN_PORT_FORWARDING_PROVIDER: protonvpn
       VPN_PORT_FORWARD_ONLY:      "on"
       PORT_FORWARD_ONLY:          "on"
-      FIREWALL_VPN_INPUT_PORTS:    "8080,9999"
+      FIREWALL_VPN_INPUT_PORTS:    "8080,9696,9999"
       HEALTH_SERVER_ADDRESS: 0.0.0.0:9999
+      # DNS Configuration for better resolution
+      DNS: 1.1.1.1,8.8.8.8
       # Improved stability and reliability settings
       LOG_LEVEL:                  info
       VPN_PORT_FORWARDING_UP_COMMAND: /bin/sh -c 'wget -O- --retry-connrefused --wait=5 --tries=10 --post-data "json={\"listen_port\":{{PORTS}}}" http://127.0.0.1:8080/api/v2/app/setPreferences 2>&1'
@@ -92,6 +95,13 @@ services:
       traefik.http.routers.qbittorrent-secure.tls.certresolver:      letsencrypt
       traefik.http.routers.qbittorrent-secure.service:               qbittorrent-svc
       traefik.http.services.qbittorrent-svc.loadbalancer.server.port: "8080"
+      # Prowlarr
+      traefik.http.routers.prowlarr-secure.entrypoints:              websecure
+      traefik.http.routers.prowlarr-secure.rule:                     Host(`prowlarr.${DOMAIN_NAME}`)
+      traefik.http.routers.prowlarr-secure.tls:                      "true"
+      traefik.http.routers.prowlarr-secure.tls.certresolver:         letsencrypt
+      traefik.http.routers.prowlarr-secure.service:                  prowlarr-svc
+      traefik.http.services.prowlarr-svc.loadbalancer.server.port:   "9696"
   qbittorrent:
     image: linuxserver/qbittorrent:latest
     container_name: qbittorrent
@@ -234,25 +244,14 @@ services:
   prowlarr:
     image: linuxserver/prowlarr:latest
     container_name: prowlarr
+    network_mode: "service:gluetun"
     depends_on:
       gluetun:
         condition: service_healthy
     environment: *arr-env
-    networks:
-      - traefik_proxy
-    ports:
-      - "9696:9696"
     volumes:
       - /mnt/user/appdata/prowlarr:/config
     restart: unless-stopped
-    labels:
-      traefik.enable: "true"
-      traefik.http.routers.prowlarr-secure.entrypoints:              websecure
-      traefik.http.routers.prowlarr-secure.rule:                     Host(`prowlarr.${DOMAIN_NAME}`)
-      traefik.http.routers.prowlarr-secure.tls:                      "true"
-      traefik.http.routers.prowlarr-secure.tls.certresolver:         letsencrypt
-      traefik.http.routers.prowlarr-secure.service:                  prowlarr-svc
-      traefik.http.services.prowlarr-svc.loadbalancer.server.port:   "9696"
   overseerr:
     image: lscr.io/linuxserver/overseerr:latest
     container_name: overseerr
