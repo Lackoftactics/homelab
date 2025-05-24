@@ -48,7 +48,6 @@ services:
       - ./.env
     ports:
       - "8080:8080" # qbittorrent
-      - "9696:9696" # prowlarr
       - "9999:9999/tcp"  # Health check server
     environment:
       TZ:                         ${TZ}
@@ -67,7 +66,7 @@ services:
       VPN_PORT_FORWARDING_PROVIDER: protonvpn
       VPN_PORT_FORWARD_ONLY:      "on"
       PORT_FORWARD_ONLY:          "on"
-      FIREWALL_VPN_INPUT_PORTS:    "8080,9696,9999"
+      FIREWALL_VPN_INPUT_PORTS:    "8080,9999"
       HEALTH_SERVER_ADDRESS: 0.0.0.0:9999
       # DNS Configuration for better resolution
       DNS: 1.1.1.1,8.8.8.8
@@ -80,6 +79,7 @@ services:
     networks:
       - traefik_proxy
       - vpn_network
+      - arr_internal
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9999/health"]
       interval: 30s
@@ -95,13 +95,6 @@ services:
       traefik.http.routers.qbittorrent-secure.tls.certresolver:      letsencrypt
       traefik.http.routers.qbittorrent-secure.service:               qbittorrent-svc
       traefik.http.services.qbittorrent-svc.loadbalancer.server.port: "8080"
-      # Prowlarr
-      traefik.http.routers.prowlarr-secure.entrypoints:              websecure
-      traefik.http.routers.prowlarr-secure.rule:                     Host(`prowlarr.${DOMAIN_NAME}`)
-      traefik.http.routers.prowlarr-secure.tls:                      "true"
-      traefik.http.routers.prowlarr-secure.tls.certresolver:         letsencrypt
-      traefik.http.routers.prowlarr-secure.service:                  prowlarr-svc
-      traefik.http.services.prowlarr-svc.loadbalancer.server.port:   "9696"
   qbittorrent:
     image: linuxserver/qbittorrent:latest
     container_name: qbittorrent
@@ -150,6 +143,7 @@ services:
     restart: unless-stopped
     networks:
       - traefik_proxy
+      - arr_internal
     ports:
       - "8096:8096"
     labels:
@@ -173,6 +167,7 @@ services:
       - "8989:8989"
     networks:
       - traefik_proxy
+      - arr_internal
     volumes:
       - /mnt/user/appdata/sonarr:/config
       - /mnt/user/media/tv:/tv
@@ -201,6 +196,7 @@ services:
     environment: *arr-env
     networks:
       - traefik_proxy
+      - arr_internal
     ports:
       - "7878:7878"
     volumes:
@@ -208,6 +204,12 @@ services:
       - /mnt/user/media/movies:/movies
       - /mnt/user/media/downloads/qbittorrent:/downloads
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7878/health"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     labels:
       traefik.enable: "true"
       traefik.http.routers.radarr-secure.entrypoints:                websecure
@@ -228,11 +230,18 @@ services:
       - "8787:8787"
     networks:
       - traefik_proxy
+      - arr_internal
     volumes:
       - /mnt/user/appdata/readarr:/config
       - /mnt/user/media/books:/books
       - /mnt/user/media/downloads/qbittorrent:/downloads
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8787/health"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     labels:
       traefik.enable: "true"
       traefik.http.routers.readarr-secure.entrypoints:               websecure
@@ -244,14 +253,32 @@ services:
   prowlarr:
     image: linuxserver/prowlarr:latest
     container_name: prowlarr
-    network_mode: "service:gluetun"
     depends_on:
       gluetun:
         condition: service_healthy
     environment: *arr-env
+    networks:
+      - traefik_proxy
+      - arr_internal
+    ports:
+      - "9696:9696"
     volumes:
       - /mnt/user/appdata/prowlarr:/config
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9696/health"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.prowlarr-secure.entrypoints:              websecure
+      traefik.http.routers.prowlarr-secure.rule:                     Host(`prowlarr.${DOMAIN_NAME}`)
+      traefik.http.routers.prowlarr-secure.tls:                      "true"
+      traefik.http.routers.prowlarr-secure.tls.certresolver:         letsencrypt
+      traefik.http.routers.prowlarr-secure.service:                  prowlarr-svc
+      traefik.http.services.prowlarr-svc.loadbalancer.server.port:   "9696"
   overseerr:
     image: lscr.io/linuxserver/overseerr:latest
     container_name: overseerr
@@ -260,6 +287,7 @@ services:
         condition: service_healthy
     networks:
       - traefik_proxy
+      - arr_internal
     ports:
       - "5055:5055"
     environment:
@@ -269,6 +297,12 @@ services:
     volumes:
       - /mnt/user/appdata/overseerr/config:/config
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5055/health"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     labels:
       traefik.enable: "true"
       traefik.http.routers.overseerr-secure.entrypoints:             websecure
@@ -286,6 +320,7 @@ services:
     environment: *arr-env
     networks:
       - traefik_proxy
+      - arr_internal
     ports:
       - "6767:6767"
     volumes:
@@ -293,6 +328,12 @@ services:
       - /mnt/user/media/movies:/movies
       - /mnt/user/media/tv:/tv
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6767/health"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     labels:
       traefik.enable: "true"
       traefik.http.routers.bazarr-secure.entrypoints:                websecure
@@ -319,6 +360,13 @@ services:
       - /mnt/user/appdata/lingarr:/app/config
     networks:
       - traefik_proxy
+      - arr_internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9876/health"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     labels:
       traefik.enable: "true"
       traefik.http.routers.lingarr-secure.entrypoints:               websecure
@@ -362,6 +410,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - arr_internal
+      - traefik_proxy
+      - vpn_network
 
   # VPN connection monitor and auto-healer - DISABLED
   # vpn-monitor:
