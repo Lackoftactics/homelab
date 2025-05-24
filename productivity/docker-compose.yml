@@ -8,22 +8,28 @@ services:
       - ./.env
     restart: unless-stopped
     ports:
-      - "3000:8080"
+      - "3001:8080"  # Changed from 3000 to avoid conflict with AdGuard Home
     volumes:
       - /mnt/user/appdata/openwebui_data:/app/backend/data
     networks:
       - traefik_proxy
+    environment:
+      - TZ=${TZ:-Europe/Warsaw}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.chat.rule=Host(`chat.${DOMAIN_NAME}`)"
-      - "traefik.http.routers.chat.entrypoints=websecure"
-      - "traefik.http.routers.chat.service=api@internal"
-      - "traefik.http.routers.chat.tls=true"
-      - "traefik.http.routers.chat.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.openwebui-secure.rule=Host(`chat.${DOMAIN_NAME}`)"
+      - "traefik.http.routers.openwebui-secure.entrypoints=websecure"
+      - "traefik.http.routers.openwebui-secure.tls=true"
+      - "traefik.http.routers.openwebui-secure.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.openwebui-secure.service=openwebui-svc"
+      - "traefik.http.services.openwebui-svc.loadbalancer.server.port=8080"
 
 networks:
   traefik_proxy:
     external: true
-
-volumes:
-  openwebui_data:
