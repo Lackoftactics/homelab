@@ -1,8 +1,9 @@
 #!/bin/bash
 # =============================================================================
-# Nextcloud Homelab Cloud Setup Script
+# Nextcloud Homelab Cloud Setup Script - Unraid Optimized
 # =============================================================================
 # This script automates the initial setup of the Nextcloud homelab cloud
+# Specifically designed for Unraid OS
 
 set -euo pipefail
 
@@ -11,7 +12,7 @@ set -euo pipefail
 # =============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLOUD_DIR="$(dirname "$SCRIPT_DIR")"
-LOG_FILE="/var/log/cloud-setup.log"
+LOG_FILE="/mnt/user/appdata/cloud-setup.log"
 
 # =============================================================================
 # LOGGING FUNCTIONS
@@ -32,37 +33,37 @@ success() {
 # UTILITY FUNCTIONS
 # =============================================================================
 check_prerequisites() {
-    log "Checking prerequisites..."
-    
-    # Check if Docker is installed and running
+    log "Checking prerequisites for Unraid..."
+
+    # Check if we're on Unraid
+    if [[ ! -f "/etc/unraid-version" ]]; then
+        log "WARNING: This script is optimized for Unraid OS"
+    fi
+
+    # Check if Docker is available
     if ! command -v docker &> /dev/null; then
-        error "Docker is not installed"
+        error "Docker is not available. Please enable Docker in Unraid settings."
         exit 1
     fi
-    
-    if ! docker info &> /dev/null; then
-        error "Docker is not running"
-        exit 1
-    fi
-    
+
     # Check if Docker Compose is available
     if ! docker-compose --version &> /dev/null; then
-        error "Docker Compose is not installed"
+        error "Docker Compose is not available. Please install the Compose Manager plugin."
         exit 1
     fi
-    
-    # Check if running as root or with sudo
-    if [[ $EUID -ne 0 ]]; then
-        error "This script must be run as root or with sudo"
+
+    # Check if appdata directory exists
+    if [[ ! -d "/mnt/user/appdata" ]]; then
+        error "Unraid appdata directory not found at /mnt/user/appdata"
         exit 1
     fi
-    
+
     success "Prerequisites check passed"
 }
 
 create_directories() {
-    log "Creating required directories..."
-    
+    log "Creating required directories for Unraid..."
+
     local directories=(
         "/mnt/user/appdata/nextcloud/data"
         "/mnt/user/appdata/nextcloud/postgres"
@@ -72,9 +73,8 @@ create_directories() {
         "/mnt/user/appdata/paperless/consume"
         "/mnt/user/appdata/bookstack/data"
         "/mnt/user/backups/cloud"
-        "/var/log"
     )
-    
+
     for dir in "${directories[@]}"; do
         if [[ ! -d "$dir" ]]; then
             log "Creating directory: $dir"
@@ -83,36 +83,37 @@ create_directories() {
             log "Directory already exists: $dir"
         fi
     done
-    
+
     success "Directories created"
 }
 
 set_permissions() {
-    log "Setting proper permissions..."
-    
-    # Set ownership for application data
-    chown -R 1000:1000 /mnt/user/appdata/nextcloud
-    chown -R 1000:1000 /mnt/user/appdata/paperless
-    chown -R 1000:1000 /mnt/user/appdata/bookstack
-    
-    # Set permissions for backup directory
-    chmod 750 /mnt/user/backups/cloud
-    
+    log "Setting Unraid-compatible permissions..."
+
+    # Unraid typically handles permissions through PUID/PGID
+    # We'll set basic permissions but rely on container PUID/PGID
+
+    # Ensure directories are accessible
+    chmod -R 755 /mnt/user/appdata/nextcloud
+    chmod -R 755 /mnt/user/appdata/paperless
+    chmod -R 755 /mnt/user/appdata/bookstack
+    chmod -R 755 /mnt/user/backups/cloud
+
     # Make scripts executable
     chmod +x "$SCRIPT_DIR"/*.sh
     chmod +x "$CLOUD_DIR/postgres/init-multiple-databases.sh"
-    
-    success "Permissions set"
+
+    success "Permissions set for Unraid"
 }
 
 setup_environment() {
     log "Setting up environment configuration..."
-    
+
     if [[ ! -f "$CLOUD_DIR/.env" ]]; then
         if [[ -f "$CLOUD_DIR/.env.example" ]]; then
             log "Copying .env.example to .env"
             cp "$CLOUD_DIR/.env.example" "$CLOUD_DIR/.env"
-            
+
             echo
             echo "=============================================="
             echo "IMPORTANT: Environment Configuration Required"
@@ -136,66 +137,94 @@ setup_environment() {
     else
         log ".env file already exists"
     fi
-    
+
     success "Environment configuration ready"
 }
 
 check_traefik_network() {
     log "Checking Traefik network..."
-    
+
     if ! docker network ls | grep -q "traefik_proxy"; then
         log "Creating traefik_proxy network..."
         docker network create traefik_proxy
     else
         log "traefik_proxy network already exists"
     fi
-    
+
     success "Traefik network ready"
 }
 
 deploy_services() {
     log "Deploying cloud services..."
-    
+
     cd "$CLOUD_DIR"
-    
+
     # Pull latest images
     log "Pulling latest Docker images..."
     docker-compose pull
-    
+
     # Start services
     log "Starting services..."
     docker-compose up -d
-    
+
     # Wait for services to be ready
     log "Waiting for services to initialize (this may take a few minutes)..."
     sleep 120
-    
+
     # Check service status
     log "Checking service status..."
     docker-compose ps
-    
+
     success "Services deployed"
 }
 
-setup_cron_backup() {
-    log "Setting up automated backups..."
-    
-    # Create cron job for daily backups at 2 AM
-    local cron_job="0 2 * * * $SCRIPT_DIR/backup-cloud.sh"
-    
-    # Check if cron job already exists
-    if crontab -l 2>/dev/null | grep -q "backup-cloud.sh"; then
-        log "Backup cron job already exists"
+setup_unraid_backup() {
+    log "Setting up Unraid User Scripts backup..."
+
+    # Create User Scripts directory if it doesn't exist
+    local user_scripts_dir="/boot/config/plugins/user.scripts/scripts"
+
+    if [[ -d "$user_scripts_dir" ]]; then
+        local backup_script_dir="$user_scripts_dir/cloud-backup"
+
+        if [[ ! -d "$backup_script_dir" ]]; then
+            log "Creating User Scripts backup entry..."
+            mkdir -p "$backup_script_dir"
+
+            # Create the User Scripts wrapper
+            cat > "$backup_script_dir/script" << 'EOF'
+#!/bin/bash
+# Nextcloud Cloud Backup - User Scripts Integration
+# This script is called by Unraid User Scripts plugin
+
+SCRIPT_DIR="/mnt/user/appdata/docker/cloud/scripts"
+if [[ -f "$SCRIPT_DIR/backup-cloud.sh" ]]; then
+    echo "Starting Nextcloud Cloud backup..."
+    bash "$SCRIPT_DIR/backup-cloud.sh"
+else
+    echo "ERROR: Backup script not found at $SCRIPT_DIR/backup-cloud.sh"
+    exit 1
+fi
+EOF
+            chmod +x "$backup_script_dir/script"
+
+            # Create description file
+            echo "Automated backup for Nextcloud Cloud services" > "$backup_script_dir/description"
+
+            success "User Scripts backup entry created"
+            log "Configure schedule in Unraid User Scripts plugin: Settings > User Scripts"
+        else
+            log "User Scripts backup entry already exists"
+        fi
     else
-        log "Adding backup cron job..."
-        (crontab -l 2>/dev/null; echo "$cron_job") | crontab -
-        success "Backup cron job added (daily at 2 AM)"
+        log "User Scripts plugin not detected. Install from Community Applications for automated backups."
+        log "Manual backup available: $SCRIPT_DIR/backup-cloud.sh"
     fi
 }
 
 display_access_info() {
     local domain_name=$(grep "DOMAIN_NAME=" "$CLOUD_DIR/.env" | cut -d'=' -f2)
-    
+
     echo
     echo "=============================================="
     echo "🎉 Nextcloud Homelab Cloud Setup Complete!"
@@ -216,11 +245,18 @@ display_access_info() {
     echo "  Password: password"
     echo "  ⚠️  CHANGE THIS IMMEDIATELY!"
     echo
-    echo "Backup Information:"
-    echo "📅 Automated backups: Daily at 2:00 AM"
-    echo "💾 Backup location: /mnt/user/backups/cloud/"
+    echo "Unraid Integration:"
+    echo "🖥️  Monitor containers: Unraid Docker tab"
+    echo "📊 Resource usage: Unraid Dashboard"
+    echo "⚙️  Backup scheduling: Settings > User Scripts"
     echo "🔧 Manual backup: $SCRIPT_DIR/backup-cloud.sh"
     echo "🔄 Restore backup: $SCRIPT_DIR/restore-cloud.sh"
+    echo
+    echo "Storage Locations:"
+    echo "💾 App data: /mnt/user/appdata/nextcloud/"
+    echo "💾 Documents: /mnt/user/appdata/paperless/"
+    echo "💾 Wiki data: /mnt/user/appdata/bookstack/"
+    echo "💾 Backups: /mnt/user/backups/cloud/"
     echo
     echo "Logs and Monitoring:"
     echo "📊 Setup log: $LOG_FILE"
@@ -237,19 +273,19 @@ display_access_info() {
 # MAIN EXECUTION
 # =============================================================================
 main() {
-    log "Starting Nextcloud Homelab Cloud setup..."
-    
+    log "Starting Nextcloud Homelab Cloud setup for Unraid..."
+
     # Create log directory if it doesn't exist
     mkdir -p "$(dirname "$LOG_FILE")"
-    
+
     check_prerequisites
     create_directories
     set_permissions
     setup_environment
     check_traefik_network
     deploy_services
-    setup_cron_backup
-    
+    setup_unraid_backup
+
     success "Setup completed successfully!"
     display_access_info
 }

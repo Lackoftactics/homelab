@@ -25,28 +25,45 @@ A production-ready Docker Compose configuration for a personal homelab cloud set
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Docker and Docker Compose installed
+- **Unraid OS** with Docker enabled
+- **Compose Manager** plugin installed (from Community Applications)
+- **User Scripts** plugin (optional, for automated backups)
 - Existing Traefik setup (from your infra directory)
 - Domain configured (*.fajnachata.club)
 - Sufficient storage space (recommend 100GB+ for `/mnt/user/appdata/`)
 
-### 1. Initial Setup
+### 🎯 Unraid-Optimized Setup
+
+This configuration is specifically optimized for Unraid OS with:
+- Direct volume mounts (no complex named volumes)
+- PUID/PGID environment variables for proper permissions
+- Unraid User Scripts integration for backups
+- Simplified directory structure
+
+### 1. Automated Setup (Recommended)
 
 ```bash
 # Navigate to the cloud directory
-cd /Volumes/appdata/docker/cloud
+cd /mnt/user/appdata/docker/cloud
 
-# Create required directories
-sudo mkdir -p /mnt/user/appdata/nextcloud/{data,postgres,redis}
-sudo mkdir -p /mnt/user/appdata/paperless/{data,media,consume}
-sudo mkdir -p /mnt/user/appdata/bookstack/data
+# Run the Unraid-optimized setup script
+./scripts/setup.sh
+```
 
-# Set proper permissions
-sudo chown -R 1000:1000 /mnt/user/appdata/nextcloud
-sudo chown -R 1000:1000 /mnt/user/appdata/paperless
-sudo chown -R 1000:1000 /mnt/user/appdata/bookstack
+### 2. Manual Setup (Alternative)
 
-# Make the PostgreSQL init script executable
+```bash
+# Navigate to the cloud directory
+cd /mnt/user/appdata/docker/cloud
+
+# Create required directories (Unraid will handle permissions)
+mkdir -p /mnt/user/appdata/nextcloud/{data,postgres,redis}
+mkdir -p /mnt/user/appdata/paperless/{data,media,consume}
+mkdir -p /mnt/user/appdata/bookstack/data
+mkdir -p /mnt/user/backups/cloud
+
+# Make scripts executable
+chmod +x scripts/*.sh
 chmod +x postgres/init-multiple-databases.sh
 ```
 
@@ -200,13 +217,20 @@ echo "Backup completed: $BACKUP_DIR/$DATE"
 ```
 
 ### Backup Schedule
-Set up automated backups using cron:
+
+#### Unraid User Scripts (Recommended)
+1. Install **User Scripts** plugin from Community Applications
+2. Go to **Settings > User Scripts**
+3. Add new script: **cloud-backup** (created automatically by setup script)
+4. Set schedule: **Daily at 2 AM** (`0 2 * * *`)
+
+#### Manual Cron (Alternative)
 ```bash
 # Edit crontab
 crontab -e
 
 # Add daily backup at 2 AM
-0 2 * * * /path/to/backup-cloud.sh
+0 2 * * * /mnt/user/appdata/docker/cloud/scripts/backup-cloud.sh
 ```
 
 ## 🔍 Troubleshooting
@@ -275,3 +299,40 @@ This setup is designed to work alongside your existing infrastructure:
 - **Tailscale**: Compatible with your Tailscale network setup
 - **Storage**: Uses standard `/mnt/user/appdata/` pattern
 - **Environment**: Consistent with your existing `.env` patterns
+
+## 🖥️ Unraid-Specific Features
+
+### Container Management
+- **Docker Tab**: Monitor all containers from Unraid's Docker tab
+- **Resource Usage**: View CPU/RAM usage in Unraid Dashboard
+- **Auto-Start**: Containers automatically start with Unraid
+- **Updates**: Use Unraid's built-in update notifications
+
+### Storage Integration
+- **Cache Drive**: Containers run from cache drive for better performance
+- **Array Storage**: Data stored on protected array storage
+- **Mover**: Automatic data movement between cache and array
+- **Snapshots**: Use Unraid's snapshot features for additional protection
+
+### Backup Integration
+- **User Scripts**: Automated backups through User Scripts plugin
+- **CA Backup**: Compatible with Community Applications backup plugin
+- **Manual Backups**: Easy manual backup execution from Unraid terminal
+
+### Monitoring
+- **Unraid Dashboard**: Resource usage and container status
+- **Notifications**: Unraid can send alerts for container issues
+- **Logs**: Access container logs through Unraid Docker tab
+- **Health Checks**: Container health visible in Unraid interface
+
+### Network Configuration
+- **Bridge Mode**: Uses Unraid's default Docker bridge network
+- **Traefik Integration**: Seamless integration with existing Traefik setup
+- **Port Management**: No port conflicts with Unraid services
+- **Tailscale**: Full compatibility with Tailscale exit nodes
+
+### Performance Optimization
+- **PUID/PGID**: Proper user mapping for Unraid permissions
+- **Direct Mounts**: No performance overhead from named volumes
+- **Resource Limits**: Prevents containers from overwhelming system
+- **SSD Cache**: Fast access to frequently used data
