@@ -29,7 +29,6 @@ networks:
   # Internal network for arr services to communicate with each other
   arr_internal:
     driver: bridge
-    internal: true
 
   # VPN network for torrent traffic
   vpn_network:
@@ -140,6 +139,7 @@ services:
       - /mnt/user/appdata/jellyfin:/config
       - /mnt/user/media/movies:/data/movies
       - /mnt/user/media/tv:/data/tvshows
+      - /mnt/user/media/downloads/transmission:/data/downloads/transmission
     restart: unless-stopped
     networks:
       - traefik_proxy
@@ -218,38 +218,6 @@ services:
       traefik.http.routers.radarr-secure.tls.certresolver:           letsencrypt
       traefik.http.routers.radarr-secure.service:                    radarr-svc
       traefik.http.services.radarr-svc.loadbalancer.server.port:     "7878"
-
-  readarr:
-    image: ghcr.io/hotio/readarr:latest
-    container_name: readarr
-    depends_on:
-      gluetun:
-        condition: service_healthy
-    environment: *arr-env
-    ports:
-      - "8787:8787"
-    networks:
-      - traefik_proxy
-      - arr_internal
-    volumes:
-      - /mnt/user/appdata/readarr:/config
-      - /mnt/user/media/books:/books
-      - /mnt/user/media/downloads/qbittorrent:/downloads
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8787/health"]
-      interval: 1m
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    labels:
-      traefik.enable: "true"
-      traefik.http.routers.readarr-secure.entrypoints:               websecure
-      traefik.http.routers.readarr-secure.rule:                      Host(`readarr.${DOMAIN_NAME}`)
-      traefik.http.routers.readarr-secure.tls:                       "true"
-      traefik.http.routers.readarr-secure.tls.certresolver:          letsencrypt
-      traefik.http.routers.readarr-secure.service:                   readarr-svc
-      traefik.http.services.readarr-svc.loadbalancer.server.port:    "8787"
   prowlarr:
     image: linuxserver/prowlarr:latest
     container_name: prowlarr
@@ -342,39 +310,6 @@ services:
       traefik.http.routers.bazarr-secure.tls.certresolver:           letsencrypt
       traefik.http.routers.bazarr-secure.service:                    bazarr-svc
       traefik.http.services.bazarr-svc.loadbalancer.server.port:     "6767"
-  lingarr:
-    image: lingarr/lingarr:latest
-    container_name: lingarr
-    depends_on:
-      gluetun:
-        condition: service_healthy
-    restart: unless-stopped
-    environment:
-      <<: *arr-env
-      ASPNETCORE_URLS: http://+:9876
-    ports:
-      - "9876:9876"
-    volumes:
-      - /mnt/user/media/movies:/movies
-      - /mnt/user/media/tv:/tv
-      - /mnt/user/appdata/lingarr:/app/config
-    networks:
-      - traefik_proxy
-      - arr_internal
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9876/health"]
-      interval: 1m
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    labels:
-      traefik.enable: "true"
-      traefik.http.routers.lingarr-secure.entrypoints:               websecure
-      traefik.http.routers.lingarr-secure.rule:                      Host(`lingarr.${DOMAIN_NAME}`)
-      traefik.http.routers.lingarr-secure.tls:                       "true"
-      traefik.http.routers.lingarr-secure.tls.certresolver:          letsencrypt
-      traefik.http.routers.lingarr-secure.service:                   lingarr-svc
-      traefik.http.services.lingarr-svc.loadbalancer.server.port:    "9876"
   # jellyfin-auto-collections:
   #   image: ghcr.io/ghomashudson/jellyfin-auto-collections:latest
   #   container_name: jellyfin-auto-collections
