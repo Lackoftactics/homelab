@@ -29,6 +29,7 @@ networks:
   # Internal network for arr services to communicate with each other
   arr_internal:
     driver: bridge
+    internal: true
 
   # VPN network for torrent traffic
   vpn_network:
@@ -310,6 +311,7 @@ services:
       traefik.http.routers.bazarr-secure.tls.certresolver:           letsencrypt
       traefik.http.routers.bazarr-secure.service:                    bazarr-svc
       traefik.http.services.bazarr-svc.loadbalancer.server.port:     "6767"
+
   # jellyfin-auto-collections:
   #   image: ghcr.io/ghomashudson/jellyfin-auto-collections:latest
   #   container_name: jellyfin-auto-collections
